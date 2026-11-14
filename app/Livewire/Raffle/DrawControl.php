@@ -1,0 +1,93 @@
+<?php
+
+namespace App\Livewire\Raffle;
+use App\Models\RafflePrize;
+use App\Services\RaffleDrawService;
+use Illuminate\Validation\ValidationException;
+use App\Models\RaffleEvent;
+use Livewire\Component;
+
+class DrawControl extends Component
+{
+    public RaffleEvent $event;
+
+    public int $selectedSequence = 1;
+
+    public function mount(RaffleEvent $event): void
+    {
+        $this->event = $event;
+
+        if (! in_array($event->status, ['ready', 'ongoing', 'completed'], true)) {
+            abort(403, 'This raffle event is not ready for drawing.');
+        }
+    }
+
+    public function selectSequence(int $sequenceNumber): void
+    {
+        if ($sequenceNumber < 1 || $sequenceNumber > 9) {
+            return;
+        }
+
+        $this->selectedSequence = $sequenceNumber;
+    }
+
+    public function startDraw(
+    int $prizeId,
+    RaffleDrawService $drawService
+): void {
+    $prize = RafflePrize::findOrFail($prizeId);
+
+    try {
+        $count = $drawService->drawPrize(
+    $this->event,
+    $prize
+);
+
+$this->event->refresh();
+
+$winningNumbers = $prize->fresh()
+    ->winners()
+    ->with('attendee')
+    ->get()
+    ->pluck('attendee.raffle_number')
+    ->values()
+    ->all();
+
+$this->dispatch(
+    'raffle-prize-drawn',
+    prizeId: $prize->id,
+    numbers: $winningNumbers
+);
+
+        session()->flash(
+            'draw_success',
+            "Successfully drawn {$count} winners!"
+        );
+
+    } catch (ValidationException $e) {
+        $this->addError(
+            'draw',
+            $e->validator->errors()->first()
+        );
+    }
+}
+
+    public function render()
+    {
+        $sequences = $this->event->sequences()
+            ->with(['prizes' => function ($query) {
+    $query->orderBy('item_number')
+        ->with('winners.attendee');
+}])
+            ->orderBy('sequence_number')
+            ->get();
+
+        return view('livewire.raffle.draw-control', [
+            'sequences' => $sequences,
+            'currentSequence' => $sequences->firstWhere(
+                'sequence_number',
+                $this->selectedSequence
+            ),
+        ])->layout('layouts.app.guest');
+    }
+}
