@@ -69,7 +69,7 @@ class Events extends Component
 
         session()->flash(
             'success',
-            'Raffle event created successfully with 9 sequences and 55 prize slots.'
+            'Raffle event created successfully with 9 sequences. You can now configure the prize items.'
         );
     }
 
@@ -121,64 +121,211 @@ public function closeRegistration(
             return;
         }
 
-        $attendeeCount = $event->attendees()->count();
+        
+$attendeeCount = $event->attendees()->count();
 
-        if ($attendeeCount < 474) {
+// Get sequences 3–9 and their configured prize items.
+$fixedSequences = $event->sequences()
+    ->whereBetween('sequence_number', [3, 9])
+    ->with('prizes')
+    ->get();
+
+// Calculate the total reserved winners dynamically.
+$reservedWinners = $fixedSequences->sum(
+    fn ($sequence) => $sequence->prizes->sum('target_winners')
+);
+
+// Ensure there are enough attendees for reserved prizes.
+if ($attendeeCount < $reservedWinners) {
+    $this->addError(
+        'eventStatus',
+        "Registration cannot be closed. {$reservedWinners} winners are reserved for Sequences 3–9, but only {$attendeeCount} attendees are registered."
+    );
+
+    return;
+}
+
+
+        
+        
+ // Get all sequences and their prize items.
+$sequences = $event->sequences()
+    ->with(['prizes' => function ($query) {
+        $query->orderBy('item_number');
+    }])
+    ->orderBy('sequence_number')
+    ->get();
+
+
+// Validate all nine sequences before allocation.
+if ($sequences->count() !== 9) {
+    $this->addError(
+        'eventStatus',
+        'The raffle must have exactly 9 sequences.'
+    );
+
+    return;
+}
+
+foreach (range(1, 9) as $number) {
+    $sequence = $sequences->firstWhere('sequence_number', $number);
+
+    if (! $sequence) {
+        $this->addError(
+            'eventStatus',
+            "Sequence {$number} is missing."
+        );
+
+        return;
+    }
+
+    if ($sequence->prizes->isEmpty()) {
+        $this->addError(
+            'eventStatus',
+            "Sequence {$number} must have at least one prize item."
+        );
+
+        return;
+    }
+
+    foreach ($sequence->prizes as $prize) {
+        if (blank($prize->name)) {
             $this->addError(
                 'eventStatus',
-                "Registration cannot be closed. At least 474 attendees are required. Currently registered: {$attendeeCount}."
+                "Sequence {$number}, Item {$prize->item_number} must have a prize name."
             );
 
             return;
         }
 
+        if (
+            filter_var(
+                $prize->target_winners,
+                FILTER_VALIDATE_INT
+            ) === false ||
+            (int) $prize->target_winners < 1
+        ) {
+            $this->addError(
+                'eventStatus',
+                "Sequence {$number}, Item {$prize->item_number} must have at least 1 target winner."
+            );
+
+            return;
+        }
+    }
+}
+
+
+// Prepare prize winner quantities grouped by sequence.
+$prizeTargets = [];
+
+foreach ($sequences as $sequence) {
+    $prizeTargets[$sequence->sequence_number] = $sequence->prizes
+        ->pluck('target_winners')
+        ->map(fn ($quantity) => (int) $quantity)
+        ->all();
+}
+
+// Calculate the dynamic allocation.
+try {
+    $allocation = $allocationService->calculate(
+        $attendeeCount,
+        $prizeTargets
+    );
+} catch (\InvalidArgumentException $e) {
+    $this->addError('eventStatus', $e->getMessage());
+
+    return;
+}
+
+
         
-        // Calculate flexible winner allocation.
-        $allocation = $allocationService->calculate(
-            $attendeeCount
+// Save dynamic allocations for Sequences 1 and 2.
+foreach ($allocation as $sequenceNumber => $data) {
+
+    // Use the sequences and prizes already loaded above.
+    $sequence = $sequences->firstWhere(
+        'sequence_number',
+        $sequenceNumber
+    );
+
+    if (! $sequence) {
+        throw new \RuntimeException(
+            "Sequence {$sequenceNumber} was not found."
         );
+    }
 
-        // Save allocation for sequences 1 and 2.
-        foreach ($allocation as $sequenceNumber => $data) {
+    // Update sequence totals.
+    $sequence->update([
+        'target_winners' => $sequence->prizes->sum('target_winners'),
+        'allocated_winners' => $data['total_winners'],
+    ]);
 
-            $sequence = $event->sequences()
-                ->where('sequence_number', $sequenceNumber)
-                ->firstOrFail();
+    // Save allocated winners using actual prize records.
+    $prizes = $sequence->prizes->values();
 
-            $sequence->update([
-                'allocated_winners' => $data['total_winners'],
-            ]);
+    foreach ($data['per_item'] as $index => $winners) {
 
-            // Save flexible winners per prize item.
-            foreach ($data['per_item'] as $index => $winners) {
+        $prize = $prizes->get($index);
 
-                $prize = $sequence->prizes()
-                    ->where('item_number', $index + 1)
-                    ->firstOrFail();
-
-                $prize->update([
-                    'allocated_winners' => $winners,
-                ]);
-            }
+        if (! $prize) {
+            throw new \RuntimeException(
+                "Prize item {$index} was not found in Sequence {$sequenceNumber}."
+            );
         }
 
-        // Save fixed allocations for sequences 3–9.
-        $fixedSequences = $event->sequences()
-            ->whereBetween('sequence_number', [3, 9])
-            ->get();
+        $prize->update([
+            'allocated_winners' => $winners,
+        ]);
+    }
+}
 
-        foreach ($fixedSequences as $sequence) {
 
-            $sequence->update([
-                'allocated_winners' => $sequence->target_winners,
-            ]);
+        
+// Save exact reserved allocations for Sequences 3–9.
+foreach ($fixedSequences as $sequence) {
 
-            foreach ($sequence->prizes as $prize) {
-                $prize->update([
-                    'allocated_winners' => $prize->target_winners,
-                ]);
-            }
-        }
+    // Calculate total winners from the actual prize items.
+    $sequenceReservedWinners = $sequence->prizes
+        ->sum('target_winners');
+
+    // Update the sequence's allocated winners.
+    $sequence->update([
+        'target_winners' => $sequenceReservedWinners,
+        'allocated_winners' => $sequenceReservedWinners,
+    ]);
+
+    // Reserve the exact quantity assigned to each prize item.
+    foreach ($sequence->prizes as $prize) {
+        $prize->update([
+            'allocated_winners' => $prize->target_winners,
+        ]);
+    }
+}
+
+
+// Verify all sequence allocations before closing registration.
+$totalAllocatedWinners = (int) $event->sequences()
+    ->sum('allocated_winners');
+
+if ($totalAllocatedWinners !== $attendeeCount) {
+    throw new \RuntimeException(
+        "Allocation mismatch: {$totalAllocatedWinners} winners allocated "
+        . "for {$attendeeCount} registered attendees."
+    );
+}
+
+// Verify every sequence total matches its prize allocations.
+foreach ($event->sequences()->with('prizes')->get() as $sequence) {
+    $prizeAllocatedWinners = $sequence->prizes
+        ->sum('allocated_winners');
+
+    if ((int) $sequence->allocated_winners !== (int) $prizeAllocatedWinners) {
+        throw new \RuntimeException(
+            "Allocation mismatch in Sequence {$sequence->sequence_number}."
+        );
+    }
+}
 
 
         $event->update([

@@ -8,15 +8,18 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class RaffleSequence extends Model
 {
-    protected $fillable = [
-        'raffle_event_id',
-        'sequence_number',
-        'item_limit',
-        'allocation_type',
-        'target_winners',
-        'allocated_winners',
-        'status',
-    ];
+    
+protected $fillable = [
+    'raffle_event_id',
+    'sequence_number',
+    'item_limit',
+    'allocation_type',
+    'allocation_weight',
+    'target_winners',
+    'allocated_winners',
+    'status',
+];
+
 
     protected function casts(): array
     {

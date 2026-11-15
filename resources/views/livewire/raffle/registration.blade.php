@@ -77,33 +77,62 @@
         </div>
     @endif
 
-    {{-- Registration Overview --}}
-    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+    
+<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
 
-        <div class="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
-            <p class="text-sm font-medium text-zinc-500 dark:text-zinc-400">
-                Registered Attendees
-            </p>
+    {{-- Registered Attendees --}}
+    <div class="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
+        <p class="text-sm font-medium text-zinc-500 dark:text-zinc-400">
+            Registered Attendees
+        </p>
 
-            <p class="mt-2 text-3xl font-bold text-zinc-900 dark:text-white">
-                {{ number_format($attendeeCount) }}
-            </p>
-        </div>
+        <p class="mt-2 text-3xl font-bold text-zinc-900 dark:text-white">
+            {{ number_format($attendeeCount) }}
+        </p>
 
-        <div class="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
-            <p class="text-sm font-medium text-zinc-500 dark:text-zinc-400">
-                Minimum Required for Raffle
-            </p>
-
-            <p class="mt-2 text-3xl font-bold text-zinc-900 dark:text-white">
-                474
-            </p>
-
-            <p class="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-                Reserved winner slots for sequences 3–9
-            </p>
-        </div>
+        <p class="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+            Total attendees registered for this event
+        </p>
     </div>
+
+    {{-- Fixed Winner Slots --}}
+    <div class="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
+        <p class="text-sm font-medium text-zinc-500 dark:text-zinc-400">
+            Reserved Winner Slots
+        </p>
+
+        <p class="mt-2 text-3xl font-bold text-zinc-900 dark:text-white">
+            {{ number_format($fixedWinnerSlots) }}
+        </p>
+
+        <p class="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+            Fixed winner allocations for Sequences 3–9
+        </p>
+    </div>
+
+
+{{-- Total Allocated Winners --}}
+<div class="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
+    <p class="text-sm font-medium text-zinc-500 dark:text-zinc-400">
+        Total Allocated Winners
+    </p>
+
+    <p class="mt-2 text-3xl font-bold text-zinc-900 dark:text-white">
+        {{ number_format($totalAllocatedWinners) }}
+    </p>
+
+    <p class="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+        @if (in_array($event->status, ['ready', 'ongoing', 'completed']))
+            Final winner allocation across all 9 sequences
+        @else
+            Final allocation is calculated when registration closes
+        @endif
+    </p>
+</div>
+
+
+</div>
+
 
     {{-- Registration Form --}}
     <div class="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-700 dark:bg-zinc-900">

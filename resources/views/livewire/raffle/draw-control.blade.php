@@ -1,5 +1,10 @@
 
-<div class="mx-auto w-full max-w-7xl space-y-6 p-4 sm:p-6 lg:p-8">
+<div
+    x-data="{ drawAnimating: false }"
+    x-on:raffle-animation-started.window="drawAnimating = true"
+    x-on:raffle-animation-finished.window="drawAnimating = false"
+    class="mx-auto w-full max-w-7xl space-y-6 p-4 sm:p-6 lg:p-8"
+>
     @if (session()->has('draw_success'))
     <div class="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-800 dark:border-green-800 dark:bg-green-900/30 dark:text-green-300">
         {{ session('draw_success') }}
@@ -111,8 +116,10 @@
                     </flux:heading>
 
                     <flux:text class="mt-1">
-                        {{ $currentSequence->item_limit }} Prize Items
-                        · {{ $currentSequence->allocated_winners }} Winners
+                        
+{{ $currentSequence->prizes->count() }} Prize Items
+· {{ $currentSequence->allocated_winners }} Winners
+
                     </flux:text>
                 </div>
 
@@ -131,63 +138,13 @@
     x-data="{
         prizeId: {{ $prize->id }},
         animating: false,
-        spinningNumber: '--------',
+       
         displayedWinners: @js($prize->status === 'completed' ? $prize->winners->pluck('attendee.raffle_number')->values()->all() : []),
-        fallingNumber: '',
-        fallingStyle: {},
-        falling: false,
+        
+      
 
         sleep(ms) {
             return new Promise(resolve => setTimeout(resolve, ms));
-        },
-
-        async dropWinner(number) {
-            const source = this.$refs.spinner;
-            const target = this.$refs.winnerGrid;
-
-            if (!source || !target) {
-                this.displayedWinners.push(number);
-                return;
-            }
-
-            const start = source.getBoundingClientRect();
-            const end = target.getBoundingClientRect();
-
-            this.fallingNumber = number;
-
-            this.fallingStyle = {
-                position: 'fixed',
-                left: `${start.left}px`,
-                top: `${start.top}px`,
-                width: `${start.width}px`,
-                zIndex: 9999,
-                pointerEvents: 'none'
-            };
-
-            this.falling = true;
-
-            await this.$nextTick();
-            await this.sleep(30);
-
-            const destinationX = end.left + (end.width - start.width) / 2;
-            const destinationY = end.top;
-
-            this.fallingStyle = {
-                ...this.fallingStyle,
-                left: `${destinationX}px`,
-                top: `${destinationY}px`,
-                transform: 'scale(0.8)',
-                opacity: 0.5
-            };
-
-           await this.sleep(300);
-
-            this.displayedWinners.push(number);
-
-            await this.$nextTick();
-
-            this.falling = false;
-            this.fallingNumber = '';
         },
 
         
@@ -195,27 +152,27 @@ async animateWinners(numbers) {
     if (this.animating) return;
 
     this.animating = true;
+
+    window.dispatchEvent(
+        new CustomEvent('raffle-animation-started')
+    );
+
     this.displayedWinners = [];
 
     for (const winner of numbers) {
-        // Fast random number spinning (~150ms)
-        for (let i = 0; i < 5; i++) {
-            this.spinningNumber = numbers[Math.floor(Math.random() * numbers.length)];
-            await this.sleep(30);
-        }
+        this.displayedWinners.push(winner);
 
-        // Stop on the actual winner
-        this.spinningNumber = winner;
-
-        await this.sleep(50);
-
-        // Falling animation
-        await this.dropWinner(winner);
+        await this.$nextTick();
+        await this.sleep(150);
     }
 
     this.animating = false;
-    this.spinningNumber = '--------';
+
+    window.dispatchEvent(
+        new CustomEvent('raffle-animation-finished')
+    );
 }
+
 
     }"
     x-on:raffle-prize-drawn.window="
@@ -256,52 +213,21 @@ async animateWinners(numbers) {
                         </div>
 
                         <div class="mt-4">
-                            <flux:button
+                            
+<flux:button
     variant="primary"
     wire:click="startDraw({{ $prize->id }})"
     wire:confirm="Are you sure you want to draw winners for this prize? This action cannot be undone."
     wire:loading.attr="disabled"
     wire:target="startDraw"
-    :disabled="$prize->status !== 'pending'"
+    x-bind:disabled="drawAnimating || @js($prize->status !== 'pending' || $event->status === 'completed')"
 >
     {{ $prize->status === 'completed' ? 'Completed' : 'Start Draw' }}
 </flux:button>
 
-{{-- Animated Number Display --}}
-<div
-    x-show="animating"
-    x-cloak
-    class="mt-4 rounded-xl border border-orange-300 bg-orange-50 p-5 text-center
-           dark:border-orange-700 dark:bg-orange-950/30"
->
-    <div class="mb-3 text-xs font-semibold uppercase tracking-widest text-orange-600 dark:text-orange-400">
-        Drawing Winning Numbers
-    </div>
+                        </div>
 
-    <div
-        x-ref="spinner"
-        x-text="spinningNumber"
-        class="rounded-lg bg-white px-4 py-4 text-3xl font-black tracking-wider text-orange-600
-               shadow-sm dark:bg-zinc-900 dark:text-orange-400"
-    ></div>
 
-    <div class="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
-        <span x-text="displayedWinners.length"></span>
-        / {{ $prize->allocated_winners }} Winners
-    </div>
-</div>
-
-{{-- Floating Winning Number --}}
-<template x-teleport="body">
-    <div
-        x-show="falling"
-        x-cloak
-        :style="fallingStyle"
-        x-text="fallingNumber"
-        class="raffle-floating-winner rounded-lg border border-green-400 bg-green-100
-               px-3 py-3 text-center text-2xl font-black text-green-800 shadow-xl"
-    ></div>
-</template>
 
 {{-- Winning Numbers --}}
 <div
@@ -347,14 +273,7 @@ async animateWinners(numbers) {
 
 
 <style>
-    /* Winning number travels downward from the spinner */
-    .raffle-floating-winner {
-    transition:
-        left 300ms cubic-bezier(0.35, 0, 0.75, 0.75),
-        top 300ms cubic-bezier(0.35, 0, 0.75, 0.75),
-        transform 300ms ease-in,
-        opacity 300ms ease-in;
-}
+  
 
     /* Winner bounces when landing in the grid */
     @keyframes raffleWinnerLand {
@@ -388,13 +307,9 @@ async animateWinners(numbers) {
 
     /* Accessibility */
     @media (prefers-reduced-motion: reduce) {
-        .raffle-floating-winner {
-            transition: none;
-        }
-
-        .raffle-winner-land {
-            animation: none;
-        }
+    .raffle-winner-land {
+        animation: none;
     }
+}
 </style>
 

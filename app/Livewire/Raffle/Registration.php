@@ -95,12 +95,24 @@ public function registerAttendee(): void
 
     public function render()
     {
+        $fixedWinnerSlots = $this->event->sequences()
+    ->whereBetween('sequence_number', [3, 9])
+    ->with('prizes')
+    ->get()
+    ->sum(fn ($sequence) => $sequence->prizes->sum('target_winners'));
+
+    $totalAllocatedWinners = $this->event->sequences()
+    ->with('prizes')
+    ->get()
+    ->sum(fn ($sequence) => $sequence->prizes->sum('allocated_winners'));
+    
         return view('livewire.raffle.registration', [
             'attendees' => $this->event
                 ->attendees()
                 ->latest()
                 ->paginate(20),
-
+'fixedWinnerSlots' => $fixedWinnerSlots,
+'totalAllocatedWinners' => $totalAllocatedWinners,
             'attendeeCount' => $this->event
                 ->attendees()
                 ->count(),

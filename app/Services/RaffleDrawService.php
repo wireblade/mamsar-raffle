@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 
+
 class RaffleDrawService
 {
     public function selectRandomAttendees(
@@ -54,6 +55,12 @@ public function drawPrize(
             ->lockForUpdate()
             ->findOrFail($event->id);
 
+            if ($lockedEvent->status === 'completed') {
+    throw ValidationException::withMessages([
+        'draw' => 'This raffle event is already completed. No additional draws are allowed.',
+    ]);
+}
+
         if (! in_array($lockedEvent->status, ['ready', 'ongoing'], true)) {
             throw ValidationException::withMessages([
                 'draw' => 'This event is not ready for drawing.',
@@ -96,13 +103,34 @@ public function drawPrize(
             ]);
         }
 
-        $quantity = $lockedPrize->allocated_winners;
+        
+$quantity = (int) $lockedPrize->allocated_winners;
 
-        // Select eligible attendees randomly.
-        $winners = $this->selectRandomAttendees(
-            $lockedEvent,
-            $quantity
-        );
+// Handle prize items that received zero winners.
+
+if ($quantity === 0) {
+    $lockedPrize->update(['status' => 'completed']);
+
+    $hasPendingPrizes = $sequence->prizes()
+        ->where('status', 'pending')
+        ->exists();
+
+    if (! $hasPendingPrizes) {
+        $sequence->update(['status' => 'completed']);
+    }
+
+    $lockedEvent->update(['status' => 'ongoing']);
+
+    return 0;
+}
+
+
+// Select eligible attendees randomly.
+$winners = $this->selectRandomAttendees(
+    $lockedEvent,
+    $quantity
+);
+
 
         foreach ($winners as $attendee) {
             $lockedPrize->winners()->create([
@@ -114,13 +142,25 @@ public function drawPrize(
             ]);
         }
 
-        $lockedPrize->update([
-            'status' => 'completed',
-        ]);
+        
+$lockedPrize->update(['status' => 'completed']);
 
-        $lockedEvent->update([
-    'status' => 'ongoing',
+$hasPendingPrizes = $sequence->prizes()
+    ->where('status', 'pending')
+    ->exists();
+
+if (! $hasPendingPrizes) {
+    $sequence->update(['status' => 'completed']);
+}
+
+$hasPendingSequences = $lockedEvent->sequences()
+    ->where('status', '!=', 'completed')
+    ->exists();
+
+$lockedEvent->update([
+    'status' => $hasPendingSequences ? 'ongoing' : 'completed',
 ]);
+
 
         return $winners->count();
     });

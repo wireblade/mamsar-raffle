@@ -24,19 +24,33 @@ class AudienceDisplay extends Component
         $this->lastSeenPrizeId = $this->latestCompletedPrize()?->id;
     }
 
-    private function latestCompletedPrize(): ?RafflePrize
-    {
-        return $this->event->sequences()
-            ->with(['prizes' => function ($query) {
-                $query->where('status', 'completed')
-                    ->with('winners.attendee', 'sequence')
-                    ->orderByDesc('id');
-            }])
-            ->get()
-            ->flatMap(fn ($sequence) => $sequence->prizes)
-            ->sortByDesc('id')
-            ->first();
-    }
+    
+private function latestCompletedPrize(): ?RafflePrize
+{
+    return RafflePrize::query()
+        ->whereHas('sequence', function ($query) {
+            $query->where('raffle_event_id', $this->event->id);
+        })
+        
+
+->where('raffle_prizes.status', 'completed')
+->where('raffle_prizes.allocated_winners', '>', 0)
+
+->whereHas('winners')
+->with(['sequence', 'winners.attendee'])
+
+        ->join(
+            'raffle_sequences',
+            'raffle_prizes.raffle_sequence_id',
+            '=',
+            'raffle_sequences.id'
+        )
+        ->orderByDesc('raffle_sequences.sequence_number')
+        ->orderByDesc('raffle_prizes.item_number')
+        ->select('raffle_prizes.*')
+        ->first();
+}
+
 
     public function checkForNewDraw(): void
     {

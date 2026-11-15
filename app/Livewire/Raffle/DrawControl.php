@@ -45,6 +45,17 @@ class DrawControl extends Component
 
 $this->event->refresh();
 
+
+if ($count === 0) {
+    session()->flash(
+        'draw_success',
+        'This prize has no allocated winners and was automatically marked as completed.'
+    );
+
+    return;
+}
+
+
 $winningNumbers = $prize->fresh()
     ->winners()
     ->with('attendee')

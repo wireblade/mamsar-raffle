@@ -94,9 +94,31 @@
                     </flux:text>
                 </div>
 
-                <flux:badge>
-                    {{ ucfirst($sequence->status) }}
-                </flux:badge>
+                
+<div class="flex items-center gap-3">
+
+    <flux:badge>
+        {{ ucfirst($sequence->status) }}
+    </flux:badge>
+
+    @if (
+        in_array($event->status, ['draft', 'registration'], true) &&
+        $sequence->status === 'pending'
+    )
+        <flux:button
+            size="sm"
+            variant="primary"
+            icon="plus"
+            wire:click="addPrize({{ $sequence->id }})"
+            wire:loading.attr="disabled"
+            wire:target="addPrize({{ $sequence->id }})"
+        >
+            Add Prize Item
+        </flux:button>
+    @endif
+
+</div>
+
             </div>
 
             {{-- Prize Items --}}
@@ -106,25 +128,44 @@
                         wire:key="manage-prize-{{ $prize->id }}"
                         class="space-y-4 rounded-xl border border-zinc-200 p-4 dark:border-zinc-700"
                     >
-                        <div class="flex items-center justify-between gap-3">
-                            <span class="text-sm font-semibold text-zinc-900 dark:text-white">
-                                Item {{ $prize->item_number }}
-                            </span>
+                        
+<div class="flex items-center justify-between gap-3">
+    <span class="text-sm font-semibold text-zinc-900 dark:text-white">
+        Item {{ $prize->item_number }}
+    </span>
 
-                            @if ($prize->status === 'pending')
-                                <flux:badge color="amber">
-                                    Pending
-                                </flux:badge>
-                            @elseif ($prize->status === 'drawing')
-                                <flux:badge color="blue">
-                                    Drawing
-                                </flux:badge>
-                            @else
-                                <flux:badge color="green">
-                                    Completed
-                                </flux:badge>
-                            @endif
-                        </div>
+    <div class="flex items-center gap-2">
+        @if ($prize->status === 'pending')
+            <flux:badge color="amber">
+                Pending
+            </flux:badge>
+        @elseif ($prize->status === 'drawing')
+            <flux:badge color="blue">
+                Drawing
+            </flux:badge>
+        @else
+            <flux:badge color="green">
+                Completed
+            </flux:badge>
+        @endif
+
+        @if (
+            in_array($event->status, ['draft', 'registration'], true) &&
+            $prize->status === 'pending'
+        )
+            <flux:button
+                size="xs"
+                variant="danger"
+                icon="trash"
+                wire:click="deletePrize({{ $prize->id }})"
+                wire:confirm="Are you sure you want to delete Item {{ $prize->item_number }}? This action cannot be undone."
+                wire:loading.attr="disabled"
+                wire:target="deletePrize({{ $prize->id }})"
+            />
+        @endif
+    </div>
+</div>
+
 
                         <flux:input
                             label="Prize Name"
@@ -133,13 +174,18 @@
                             :disabled="$prize->status !== 'pending'"
                         />
 
-                        <flux:input
-                            type="number"
-                            min="1"
-                            label="Target Winners"
-                            wire:model="prizes.{{ $prize->id }}.target_winners"
-                            :disabled="$prize->status !== 'pending'"
-                        />
+                        
+<flux:input
+    type="number"
+    min="1"
+    label="Target Winners"
+    wire:model="prizes.{{ $prize->id }}.target_winners"
+    :disabled="
+        $prize->status !== 'pending' ||
+        ! in_array($event->status, ['draft', 'registration'], true)
+    "
+/>
+
 
                         <div class="flex items-center justify-between gap-2">
                             <span class="text-xs text-zinc-500 dark:text-zinc-400">
