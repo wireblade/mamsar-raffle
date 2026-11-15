@@ -95,7 +95,7 @@
                             
 {{-- Event Actions --}}
 <td class="px-5 py-4">
-    <div class="flex items-center justify-end gap-2">
+    <div class="flex flex-wrap items-center justify-end gap-2">
 
         @if ($event->status === 'draft')
             <flux:button
@@ -134,6 +134,43 @@
         >
             View Registration
         </flux:button>
+
+        {{-- Prize Management --}}
+<flux:button
+    size="sm"
+    variant="outline"
+    icon="gift"
+    :href="route('raffle.prizes', $event->id)"
+    wire:navigate
+>
+    Manage Prizes
+</flux:button>
+
+        {{-- Draw Control --}}
+@if (in_array($event->status, ['ready', 'ongoing', 'completed']))
+    <flux:button
+        size="sm"
+        variant="primary"
+        icon="play"
+        :href="route('raffle.draw', $event->id)"
+        wire:navigate
+    >
+        Draw Control
+    </flux:button>
+@endif
+
+{{-- Audience Display --}}
+@if (in_array($event->status, ['ready', 'ongoing', 'completed']))
+    <flux:button
+        size="sm"
+        variant="outline"
+        icon="computer-desktop"
+        :href="route('raffle.audience', $event->id)"
+        target="_blank"
+    >
+        Audience Display
+    </flux:button>
+@endif
 
     </div>
 </td>

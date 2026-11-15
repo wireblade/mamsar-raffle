@@ -1,6 +1,12 @@
-
 <div class="mx-auto w-full max-w-7xl space-y-6 p-4 sm:p-6 lg:p-8">
-
+<a
+    href="{{ route('raffle.events') }}"
+    wire:navigate
+    class="mb-4 inline-flex items-center gap-2 text-sm font-medium text-zinc-500 transition hover:text-orange-600 dark:text-zinc-400 dark:hover:text-orange-400"
+>
+    <flux:icon.arrow-left class="size-4" />
+    Back to Events
+</a>
     {{-- Header --}}
     <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -16,17 +22,46 @@
             </flux:text>
         </div>
 
-        <div>
-            @if ($event->status === 'registration')
-                <flux:badge color="green" size="lg">
-                    Registration Open
-                </flux:badge>
-            @else
-                <flux:badge color="zinc" size="lg">
-                    {{ ucfirst($event->status) }}
-                </flux:badge>
-            @endif
-        </div>
+        <div class="flex flex-wrap items-center gap-3">
+
+    {{-- Registration Status --}}
+    @if ($event->status === 'registration')
+        <flux:badge color="green" size="lg">
+            Registration Open
+        </flux:badge>
+    @else
+        <flux:badge color="zinc" size="lg">
+            {{ ucfirst($event->status) }}
+        </flux:badge>
+    @endif
+
+    {{-- Draw Control --}}
+    @if (in_array($event->status, ['ready', 'ongoing', 'completed']))
+        <flux:button
+            size="sm"
+            variant="primary"
+            icon="play"
+            :href="route('raffle.draw', $event->id)"
+            wire:navigate
+        >
+            Draw Control
+        </flux:button>
+    @endif
+
+    {{-- Audience Display --}}
+    @if (in_array($event->status, ['ready', 'ongoing', 'completed']))
+        <flux:button
+            size="sm"
+            variant="outline"
+            icon="computer-desktop"
+            :href="route('raffle.audience', $event->id)"
+            target="_blank"
+        >
+            Audience Display
+        </flux:button>
+    @endif
+
+</div>
     </div>
 
     {{-- Success Notification --}}

@@ -5,6 +5,7 @@ use App\Livewire\Raffle\AudienceDisplay;
 use App\Livewire\Raffle\Events;
 use App\Livewire\Raffle\Registration;
 use App\Livewire\Raffle\DrawControl;
+use App\Livewire\Raffle\PrizeManagement;
 
 Route::view('/', 'welcome')->name('home');
 
@@ -20,5 +21,7 @@ Route::get('/raffle/events', Events::class)
     ->name('raffle.draw');
     Route::get('/raffle/events/{event}/audience', AudienceDisplay::class)
     ->name('raffle.audience');
+    Route::get('/raffle/events/{event}/prizes', PrizeManagement::class)
+    ->name('raffle.prizes');
 
 require __DIR__.'/settings.php';

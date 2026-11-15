@@ -1,65 +1,61 @@
-
 <div
-    wire:poll.1s
+    wire:poll.1s="checkForNewDraw"
+    wire:ignore.self
     x-data="{
         currentPrizeId: @js($currentPrize?->id),
         lastAnimatedPrizeId: @js($currentPrize?->id),
-        animating: false,
-        spinningNumber: '--------',
+        prizeName: @js($currentPrize?->name ?: 'Waiting for Draw'),
+        sequenceNumber: @js($currentPrize?->sequence?->sequence_number),
+        itemNumber: @js($currentPrize?->item_number),
         displayedWinners: @js($currentPrize?->winners->pluck('attendee.raffle_number')->values()->all() ?? []),
+        spinningNumber: @js($currentPrize?->winners->last()?->attendee?->raffle_number ?? '--------'),
+        animating: false,
+        falling: false,
         fallingNumber: '',
         fallingStyle: {},
-        falling: false,
         pendingDraw: null,
 
         sleep(ms) {
             return new Promise(resolve => setTimeout(resolve, ms));
         },
 
-        init() {
-            this.$nextTick(() => {
-                const observer = new MutationObserver(() => {
-                    this.checkDrawData();
-                });
+        receiveDraw(detail) {
+            const prizeId = Number(detail.prizeId);
 
-                observer.observe(this.$refs.drawData, {
-                    attributes: true,
-                    attributeFilter: ['data-prize-id', 'data-winners']
-                });
+            console.log('DRAW CHECK:', {
+    incomingPrizeId: prizeId,
+    currentPrizeId: this.currentPrizeId,
+    animating: this.animating
+});
 
-                this.checkDrawData();
-            });
-        },
+           if (!prizeId || prizeId === this.lastAnimatedPrizeId) {
+    return;
+}
 
-        checkDrawData() {
-            const element = this.$refs.drawData;
-
-            if (!element) return;
-
-            const prizeId = Number(element.dataset.prizeId);
-
-            if (!prizeId || prizeId === this.lastAnimatedPrizeId) {
-                return;
-            }
-
-            let numbers = [];
-
-            try {
-                numbers = JSON.parse(element.dataset.winners || '[]');
-            } catch (error) {
-                console.error('Invalid raffle winners data:', error);
-                return;
-            }
+            const draw = {
+                prizeId: prizeId,
+                numbers: detail.numbers || [],
+                prizeName: detail.prizeName || 'Waiting for Draw',
+                sequenceNumber: detail.sequenceNumber,
+                itemNumber: detail.itemNumber
+            };
 
             if (this.animating) {
-                this.pendingDraw = { prizeId, numbers };
+                this.pendingDraw = draw;
                 return;
             }
 
-            this.lastAnimatedPrizeId = prizeId;
-            this.currentPrizeId = prizeId;
+            this.startDrawAnimation(draw);
+        },
 
-            this.animateWinners(numbers);
+        async startDrawAnimation(draw) {
+            this.currentPrizeId = draw.prizeId;
+            this.lastAnimatedPrizeId = draw.prizeId;
+            this.prizeName = draw.prizeName;
+            this.sequenceNumber = draw.sequenceNumber;
+            this.itemNumber = draw.itemNumber;
+
+            await this.animateWinners(draw.numbers);
         },
 
         async dropWinner(number) {
@@ -82,7 +78,8 @@
                 top: `${start.top}px`,
                 width: `${start.width}px`,
                 zIndex: 9999,
-                pointerEvents: 'none'
+                pointerEvents: 'none',
+                opacity: 1
             };
 
             this.falling = true;
@@ -109,20 +106,20 @@
         },
 
         async animateWinners(numbers) {
-    if (this.animating) return;
+            if (this.animating) return;
 
-    this.animating = true;
+            this.animating = true;
 
-    // Clear winners from the previous prize
-    this.displayedWinners = [];
-    this.falling = false;
-    this.fallingNumber = '';
-    this.spinningNumber = '--------';
+            // Clear all winners from the previous prize.
+            this.displayedWinners = [];
+            this.spinningNumber = '--------';
+            this.falling = false;
+            this.fallingNumber = '';
 
-    // Wait for Alpine to update the winners grid
-    await this.$nextTick();
+            await this.$nextTick();
 
             for (const winner of numbers) {
+                // Spin through random raffle numbers.
                 for (let i = 0; i < 5; i++) {
                     this.spinningNumber = numbers[
                         Math.floor(Math.random() * numbers.length)
@@ -131,38 +128,32 @@
                     await this.sleep(30);
                 }
 
+                // Stop on the actual winning number.
                 this.spinningNumber = winner;
 
                 await this.sleep(50);
+
+                // Drop the winning number into the grid.
                 await this.dropWinner(winner);
             }
 
-            this.spinningNumber = '--------';
+            this.spinningNumber = numbers.at(-1) ?? '--------';
             this.animating = false;
 
             if (this.pendingDraw) {
                 const next = this.pendingDraw;
                 this.pendingDraw = null;
 
-                if (next.prizeId !== this.lastAnimatedPrizeId) {
-                    this.lastAnimatedPrizeId = next.prizeId;
-                    this.currentPrizeId = next.prizeId;
-                    this.animateWinners(next.numbers);
+                if (next.prizeId !== this.currentPrizeId) {
+                    await this.startDrawAnimation(next);
                 }
             }
         }
     }"
+    x-on:audience-draw-detected.window="console.log('LIVEWIRE EVENT RECEIVED:', $event.detail); receiveDraw($event.detail)"
     class="min-h-screen bg-slate-950 px-4 py-8 text-white sm:px-8 lg:px-12"
 >
-    {{-- Data updated by Livewire polling --}}
-    <div
-        x-ref="drawData"
-        class="hidden"
-        data-prize-id="{{ $currentPrize?->id }}"
-        data-winners="{{ json_encode($currentPrize?->winners->pluck('attendee.raffle_number')->values()->all() ?? []) }}"
-    ></div>
-
-    <div class="mx-auto max-w-7xl">
+    <div wire:ignore class="mx-auto max-w-7xl">
 
         {{-- Event Header --}}
         <div class="mb-10 text-center">
@@ -186,18 +177,17 @@
                 CURRENT PRIZE
             </div>
 
-            <h2 class="text-3xl font-extrabold sm:text-5xl">
-                {{ $currentPrize?->name ?: 'Waiting for Draw' }}
-            </h2>
+            <h2
+                class="text-3xl font-extrabold sm:text-5xl"
+                x-text="prizeName"
+            ></h2>
 
-            <p class="mt-4 text-lg text-slate-400">
-                @if ($currentPrize)
-                    Sequence {{ $currentPrize->sequence->sequence_number }}
-                    · Prize Item {{ $currentPrize->item_number }}
-                @else
-                    The raffle will begin shortly
-                @endif
-            </p>
+            <p
+                class="mt-4 text-lg text-slate-400"
+                x-text="sequenceNumber
+                    ? `Sequence ${sequenceNumber} · Prize Item ${itemNumber}`
+                    : 'The raffle will begin shortly'"
+            ></p>
 
             {{-- Main Raffle Number --}}
             <div class="mx-auto mt-10 max-w-3xl rounded-2xl border border-orange-500/30 bg-slate-950 px-4 py-12">
@@ -206,17 +196,16 @@
                     RAFFLE NUMBER
                 </div>
 
-               <div
-    x-ref="spinner"
-    x-text="spinningNumber"
-    :class="animating && !falling ? 'raffle-number-spinning' : ''"
-    class="text-5xl font-black tracking-wider text-orange-400 sm:text-7xl lg:text-8xl"
-></div>
-
+                <div
+                    x-ref="spinner"
+                    x-text="spinningNumber"
+                    :class="animating && !falling ? 'raffle-number-spinning' : ''"
+                    class="text-5xl font-black tracking-wider text-orange-400 sm:text-7xl lg:text-8xl"
+                ></div>
             </div>
         </div>
 
-        {{-- Floating Winner --}}
+        {{-- Floating Winning Number --}}
         <template x-teleport="body">
             <div
                 x-show="falling"
@@ -231,7 +220,6 @@
         <div class="mt-8 rounded-3xl border border-slate-700 bg-slate-900 p-6 sm:p-8">
 
             <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
-
                 <h3 class="text-xl font-bold sm:text-2xl">
                     Winning Raffle Numbers
                 </h3>
@@ -240,15 +228,16 @@
                     <span x-text="displayedWinners.length"></span>
                     Winners
                 </span>
-
             </div>
 
             <div
-    wire:ignore
-    x-ref="winnerGrid"
-    class="grid min-h-40 grid-cols-2 content-start gap-3 sm:grid-cols-4 lg:grid-cols-6"
->
-                <template x-for="(number, index) in displayedWinners" :key="index">
+                x-ref="winnerGrid"
+                class="grid min-h-40 grid-cols-2 content-start gap-3 sm:grid-cols-4 lg:grid-cols-6"
+            >
+                <template
+                    x-for="(number, index) in displayedWinners"
+                    :key="`${currentPrizeId}-${index}`"
+                >
                     <div
                         x-text="number"
                         class="raffle-winner-land rounded-xl border border-orange-500/30 bg-slate-950 px-3 py-4 text-center text-lg font-bold text-orange-400"
@@ -258,18 +247,17 @@
 
             <p
                 x-show="displayedWinners.length === 0 && !animating"
+                x-cloak
                 class="mt-4 text-center text-lg text-slate-500"
             >
                 Winners will appear here automatically
             </p>
-
         </div>
 
         {{-- Footer --}}
         <div class="mt-8 text-center text-sm text-slate-500">
             MAMSAR Raffle Management System
         </div>
-
     </div>
 </div>
 
@@ -311,6 +299,30 @@
         animation: raffleWinnerLand 250ms ease-out both;
     }
 
+    @keyframes raffleNumberSpin {
+        0% {
+            transform: translateY(-8px) scale(0.96);
+            opacity: 0.5;
+            filter: blur(2px);
+        }
+
+        50% {
+            transform: translateY(8px) scale(1.05);
+            opacity: 1;
+            filter: blur(0);
+        }
+
+        100% {
+            transform: translateY(-8px) scale(0.96);
+            opacity: 0.5;
+            filter: blur(2px);
+        }
+    }
+
+    .raffle-number-spinning {
+        animation: raffleNumberSpin 150ms ease-in-out infinite;
+    }
+
     [x-cloak] {
         display: none !important;
     }
@@ -320,39 +332,9 @@
             transition: none;
         }
 
-        .raffle-winner-land {
+        .raffle-winner-land,
+        .raffle-number-spinning {
             animation: none;
         }
     }
 </style>
-
-
-@keyframes raffleNumberSpin {
-    0% {
-        transform: translateY(-8px) scale(0.96);
-        opacity: 0.5;
-        filter: blur(2px);
-    }
-
-    50% {
-        transform: translateY(8px) scale(1.05);
-        opacity: 1;
-        filter: blur(0);
-    }
-
-    100% {
-        transform: translateY(-8px) scale(0.96);
-        opacity: 0.5;
-        filter: blur(2px);
-    }
-}
-
-.raffle-number-spinning {
-    animation: raffleNumberSpin 150ms ease-in-out infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .raffle-number-spinning {
-        animation: none;
-    }
-}

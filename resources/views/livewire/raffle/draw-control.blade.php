@@ -12,6 +12,15 @@
     </div>
 @enderror
 
+<a
+    href="{{ route('raffle.events') }}"
+    wire:navigate
+    class="mb-4 inline-flex items-center gap-2 text-sm font-medium text-zinc-500 transition hover:text-orange-600 dark:text-zinc-400 dark:hover:text-orange-400"
+>
+    <flux:icon.arrow-left class="size-4" />
+    Back to Events
+</a>
+
     {{-- Header --}}
     <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
@@ -24,15 +33,41 @@
             </flux:text>
         </div>
 
-        <div class="flex items-center gap-3">
-            <flux:badge color="green">
-                {{ ucfirst($event->status) }}
-            </flux:badge>
+       <div class="flex flex-wrap items-center gap-3">
 
-            <flux:badge>
-                {{ number_format($event->total_attendees) }} Attendees
-            </flux:badge>
-        </div>
+    {{-- Event Status --}}
+    <flux:badge color="green">
+        {{ ucfirst($event->status) }}
+    </flux:badge>
+
+    {{-- Total Attendees --}}
+    <flux:badge>
+        {{ number_format($event->total_attendees) }} Attendees
+    </flux:badge>
+
+    {{-- Registration --}}
+    <flux:button
+        size="sm"
+        variant="outline"
+        icon="users"
+        :href="route('raffle.registration', $event->id)"
+        wire:navigate
+    >
+        Registration
+    </flux:button>
+
+    {{-- Audience Display --}}
+    <flux:button
+        size="sm"
+        variant="primary"
+        icon="computer-desktop"
+        :href="route('raffle.audience', $event->id)"
+        target="_blank"
+    >
+        Audience Display
+    </flux:button>
+
+</div>
     </div>
 
     {{-- Sequence Selector --}}

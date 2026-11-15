@@ -3,11 +3,14 @@
 namespace App\Livewire\Raffle;
 
 use App\Models\RaffleEvent;
+use App\Models\RafflePrize;
 use Livewire\Component;
 
 class AudienceDisplay extends Component
 {
     public RaffleEvent $event;
+
+    public ?int $lastSeenPrizeId = null;
 
     public function mount(RaffleEvent $event): void
     {
@@ -16,25 +19,54 @@ class AudienceDisplay extends Component
         if (! in_array($event->status, ['ready', 'ongoing', 'completed'], true)) {
             abort(403, 'This raffle event is not ready for display.');
         }
+
+        // Already completed prizes should appear immediately, not replay on page load.
+        $this->lastSeenPrizeId = $this->latestCompletedPrize()?->id;
     }
 
-    
-public function render()
-{
-    $currentPrize = $this->event->sequences()
-        ->with(['prizes' => function ($query) {
-            $query->where('status', 'completed')
-                ->with('winners.attendee')
-                ->orderByDesc('id');
-        }])
-        ->get()
-        ->flatMap(fn ($sequence) => $sequence->prizes)
-        ->sortByDesc('id')
-        ->first();
+    private function latestCompletedPrize(): ?RafflePrize
+    {
+        return $this->event->sequences()
+            ->with(['prizes' => function ($query) {
+                $query->where('status', 'completed')
+                    ->with('winners.attendee', 'sequence')
+                    ->orderByDesc('id');
+            }])
+            ->get()
+            ->flatMap(fn ($sequence) => $sequence->prizes)
+            ->sortByDesc('id')
+            ->first();
+    }
 
-    return view('livewire.raffle.audience-display', [
-        'currentPrize' => $currentPrize,
-    ])->layout('layouts.app.guest');
-}
+    public function checkForNewDraw(): void
+    {
+        $prize = $this->latestCompletedPrize();
 
+        if (! $prize || $prize->id === $this->lastSeenPrizeId) {
+            return;
+        }
+
+        logger()->info('AUDIENCE NEW DRAW DETECTED', [
+    'prize_id' => $prize->id,
+    'previous_prize_id' => $this->lastSeenPrizeId,
+]);
+
+        $this->lastSeenPrizeId = $prize->id;
+
+        $this->dispatch(
+            'audience-draw-detected',
+            prizeId: $prize->id,
+            prizeName: $prize->name ?: 'Unnamed Prize',
+            sequenceNumber: $prize->sequence->sequence_number,
+            itemNumber: $prize->item_number,
+            numbers: $prize->winners->pluck('attendee.raffle_number')->values()->all()
+        );
+    }
+
+    public function render()
+    {
+        return view('livewire.raffle.audience-display', [
+            'currentPrize' => $this->latestCompletedPrize(),
+        ])->layout('layouts.app.guest');
+    }
 }
