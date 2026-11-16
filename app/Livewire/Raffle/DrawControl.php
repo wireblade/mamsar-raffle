@@ -1,6 +1,8 @@
 <?php
 
 namespace App\Livewire\Raffle;
+
+use Livewire\Attributes\Url;
 use App\Models\RafflePrize;
 use App\Services\RaffleDrawService;
 use Illuminate\Validation\ValidationException;
@@ -11,7 +13,8 @@ class DrawControl extends Component
 {
     public RaffleEvent $event;
 
-    public int $selectedSequence = 1;
+    #[Url(as: 'sequence')]
+public int $selectedSequence = 1;
 
     public function mount(RaffleEvent $event): void
     {

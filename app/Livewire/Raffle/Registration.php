@@ -16,6 +16,12 @@ class Registration extends Component
     public RaffleEvent $event;
 
     public string $raffleNumber = '';
+    public string $search = '';
+
+    public function updatedSearch(): void
+{
+    $this->resetPage();
+}
 
     public function mount(RaffleEvent $event): void
     {
@@ -90,32 +96,43 @@ public function registerAttendee(): void
         'registration_success',
         "Raffle number {$registeredNumber} registered successfully."
     );
+
+    $this->dispatch('registration-focus');
 }
 
 
     public function render()
-    {
-        $fixedWinnerSlots = $this->event->sequences()
-    ->whereBetween('sequence_number', [3, 9])
-    ->with('prizes')
-    ->get()
-    ->sum(fn ($sequence) => $sequence->prizes->sum('target_winners'));
+{
+    $fixedWinnerSlots = $this->event->sequences()
+        ->whereBetween('sequence_number', [3, 9])
+        ->with('prizes')
+        ->get()
+        ->sum(fn ($sequence) => $sequence->prizes->sum('target_winners'));
 
     $totalAllocatedWinners = $this->event->sequences()
-    ->with('prizes')
-    ->get()
-    ->sum(fn ($sequence) => $sequence->prizes->sum('allocated_winners'));
-    
-        return view('livewire.raffle.registration', [
-            'attendees' => $this->event
-                ->attendees()
-                ->latest()
-                ->paginate(20),
-'fixedWinnerSlots' => $fixedWinnerSlots,
-'totalAllocatedWinners' => $totalAllocatedWinners,
-            'attendeeCount' => $this->event
-                ->attendees()
-                ->count(),
-        ])->layout('layouts.app.guest');
-    }
+        ->with('prizes')
+        ->get()
+        ->sum(fn ($sequence) => $sequence->prizes->sum('allocated_winners'));
+
+    $attendees = $this->event
+        ->attendees()
+        ->when(trim($this->search) !== '', function ($query) {
+            $query->where(
+                'raffle_number',
+                'ilike',
+                '%' . trim($this->search) . '%'
+            );
+        })
+        ->latest()
+        ->paginate(20);
+
+    return view('livewire.raffle.registration', [
+        'attendees' => $attendees,
+        'fixedWinnerSlots' => $fixedWinnerSlots,
+        'totalAllocatedWinners' => $totalAllocatedWinners,
+        'attendeeCount' => $this->event
+            ->attendees()
+            ->count(),
+    ])->layout('layouts.app.guest');
+}
 }

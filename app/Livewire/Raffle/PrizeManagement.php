@@ -179,6 +179,15 @@ public function savePrize(int $prizeId): void
 
     $event = $this->event->fresh();
 
+    if ($event->status === 'completed') {
+    $this->addError(
+        "prizes.{$prizeId}.name",
+        'Completed raffle events can no longer be edited.'
+    );
+
+    return;
+}
+
     // Drawing and completed prizes cannot be edited.
     if ($prize->status !== 'pending') {
         $this->addError(

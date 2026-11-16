@@ -13,38 +13,58 @@
         falling: false,
         fallingNumber: '',
         fallingStyle: {},
-        pendingDraw: null,
+        pendingDraws: [],
+        expectedWinners: @js($currentPrize?->winners->count() ?? 0),
+        screenWidth: window.innerWidth,
+        screenHeight: window.innerHeight,
+
+        init() {
+            const updateSize = () => {
+                this.screenWidth = window.innerWidth;
+                this.screenHeight = window.innerHeight;
+            };
+            window.addEventListener('resize', updateSize);
+            this.resizeHandler = updateSize;
+        },
+
+        destroy() {
+            window.removeEventListener('resize', this.resizeHandler);
+        },
 
         sleep(ms) {
             return new Promise(resolve => setTimeout(resolve, ms));
         },
 
+        get columns() {
+            const count = Math.max(this.expectedWinners, this.displayedWinners.length);
+            const narrow = this.screenWidth < 750;
+            if (count > 36) return narrow ? 5 : 10;
+            if (count > 20) return narrow ? 4 : 8;
+            if (count > 10) return narrow ? 3 : 6;
+            if (count > 4) return narrow ? 2 : 5;
+            return narrow ? 2 : 4;
+        },
+
+        get rows() {
+            return Math.max(1, Math.ceil(Math.max(this.expectedWinners, this.displayedWinners.length, 1) / this.columns));
+        },
+
         receiveDraw(detail) {
             const prizeId = Number(detail.prizeId);
-
-            console.log('DRAW CHECK:', {
-    incomingPrizeId: prizeId,
-    currentPrizeId: this.currentPrizeId,
-    animating: this.animating
-});
-
-           if (!prizeId || prizeId === this.lastAnimatedPrizeId) {
-    return;
-}
+            if (!prizeId || prizeId === this.lastAnimatedPrizeId || this.pendingDraws.some(d => d.prizeId === prizeId)) return;
 
             const draw = {
-                prizeId: prizeId,
-                numbers: detail.numbers || [],
+                prizeId,
+                numbers: Array.isArray(detail.numbers) ? detail.numbers.map(String) : [],
                 prizeName: detail.prizeName || 'Waiting for Draw',
                 sequenceNumber: detail.sequenceNumber,
                 itemNumber: detail.itemNumber
             };
 
             if (this.animating) {
-                this.pendingDraw = draw;
+                this.pendingDraws.push(draw);
                 return;
             }
-
             this.startDrawAnimation(draw);
         },
 
@@ -54,24 +74,21 @@
             this.prizeName = draw.prizeName;
             this.sequenceNumber = draw.sequenceNumber;
             this.itemNumber = draw.itemNumber;
-
+            this.expectedWinners = draw.numbers.length;
             await this.animateWinners(draw.numbers);
         },
 
         async dropWinner(number) {
             const source = this.$refs.spinner;
             const target = this.$refs.winnerGrid;
-
-            if (!source || !target) {
+            if (!source || !target || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
                 this.displayedWinners.push(number);
                 return;
             }
 
             const start = source.getBoundingClientRect();
             const end = target.getBoundingClientRect();
-
             this.fallingNumber = number;
-
             this.fallingStyle = {
                 position: 'fixed',
                 left: `${start.left}px`,
@@ -81,260 +98,182 @@
                 pointerEvents: 'none',
                 opacity: 1
             };
-
             this.falling = true;
-
             await this.$nextTick();
             await this.sleep(30);
-
             this.fallingStyle = {
                 ...this.fallingStyle,
                 left: `${end.left + (end.width - start.width) / 2}px`,
-                top: `${end.top}px`,
-                transform: 'scale(0.8)',
-                opacity: 0.5
+                top: `${end.top + Math.min(end.height / 3, 60)}px`,
+                transform: 'scale(0.65)',
+                opacity: 0.45
             };
-
             await this.sleep(300);
-
             this.displayedWinners.push(number);
-
             await this.$nextTick();
-
             this.falling = false;
             this.fallingNumber = '';
         },
 
         async animateWinners(numbers) {
             if (this.animating) return;
-
             this.animating = true;
-
-            // Clear all winners from the previous prize.
             this.displayedWinners = [];
             this.spinningNumber = '--------';
             this.falling = false;
             this.fallingNumber = '';
-
             await this.$nextTick();
 
             for (const winner of numbers) {
-                // Spin through random raffle numbers.
                 for (let i = 0; i < 5; i++) {
-                    this.spinningNumber = numbers[
-                        Math.floor(Math.random() * numbers.length)
-                    ];
-
+                    this.spinningNumber = numbers[Math.floor(Math.random() * numbers.length)] ?? '--------';
                     await this.sleep(30);
                 }
-
-                // Stop on the actual winning number.
                 this.spinningNumber = winner;
-
                 await this.sleep(50);
-
-                // Drop the winning number into the grid.
                 await this.dropWinner(winner);
             }
 
             this.spinningNumber = numbers.at(-1) ?? '--------';
             this.animating = false;
-
-            if (this.pendingDraw) {
-                const next = this.pendingDraw;
-                this.pendingDraw = null;
-
-                if (next.prizeId !== this.currentPrizeId) {
-                    await this.startDrawAnimation(next);
-                }
-            }
+            const next = this.pendingDraws.shift();
+            if (next && next.prizeId !== this.currentPrizeId) await this.startDrawAnimation(next);
         }
     }"
-    x-on:audience-draw-detected.window="console.log('LIVEWIRE EVENT RECEIVED:', $event.detail); receiveDraw($event.detail)"
-    class="min-h-screen bg-slate-950 px-4 py-8 text-white sm:px-8 lg:px-12"
+    x-on:audience-draw-detected.window="receiveDraw($event.detail)"
+    class="raffle-audience bg-slate-950 text-white"
 >
-    <div wire:ignore class="mx-auto max-w-7xl">
-
-        {{-- Event Header --}}
-        <div class="mb-10 text-center">
-            <div class="mb-3 text-sm font-semibold uppercase tracking-[0.3em] text-orange-400">
-                MAMSAR RAFFLE EVENT
+    <div wire:ignore class="raffle-stage mx-auto w-full max-w-[1920px]">
+        {{-- Compact event header --}}
+        <header class="raffle-header flex min-w-0 items-center justify-between gap-4 border-b border-slate-700/60">
+            <div class="min-w-0">
+                <p class="text-[10px] font-bold uppercase tracking-[0.22em] text-orange-400 sm:text-xs">MAMSAR RAFFLE EVENT</p>
+                <h1 class="truncate text-lg font-black tracking-tight sm:text-2xl xl:text-3xl">{{ $event->name }}</h1>
             </div>
-
-            <h1 class="text-3xl font-black tracking-tight sm:text-5xl lg:text-6xl">
-                {{ $event->name }}
-            </h1>
-
-            <p class="mt-4 text-lg text-slate-400">
-                Live Raffle Draw
-            </p>
-        </div>
-
-        {{-- Current Prize --}}
-        <div class="rounded-3xl border border-slate-700 bg-slate-900 p-6 text-center shadow-2xl sm:p-10">
-
-            <div class="mb-4 text-sm font-semibold uppercase tracking-widest text-orange-400">
-                CURRENT PRIZE
+            <div class="flex shrink-0 items-center gap-2 rounded-full border border-orange-500/25 bg-orange-500/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-orange-300 sm:text-xs">
+                <span class="h-2 w-2 rounded-full bg-orange-400"></span>
+                Live Draw
             </div>
+        </header>
 
-            <h2
-                class="text-3xl font-extrabold sm:text-5xl"
-                x-text="prizeName"
-            ></h2>
-
-            <p
-                class="mt-4 text-lg text-slate-400"
-                x-text="sequenceNumber
-                    ? `Sequence ${sequenceNumber} · Prize Item ${itemNumber}`
-                    : 'The raffle will begin shortly'"
-            ></p>
-
-            {{-- Main Raffle Number --}}
-            <div class="mx-auto mt-10 max-w-3xl rounded-2xl border border-orange-500/30 bg-slate-950 px-4 py-12">
-
-                <div class="mb-4 text-sm font-semibold uppercase tracking-widest text-slate-400">
-                    RAFFLE NUMBER
+        {{-- Prize and number: intentionally compact to leave room for winners --}}
+        <section class="raffle-prize relative min-h-0 overflow-hidden rounded-2xl border border-orange-500/25 bg-slate-900/95">
+            <div class="pointer-events-none absolute -right-20 -top-24 h-48 w-48 rounded-full bg-orange-500/10 blur-3xl"></div>
+            <div class="relative flex h-full min-h-0 flex-col items-center justify-center gap-2 px-3 py-2 text-center sm:px-6">
+                <div class="flex flex-wrap items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-wider sm:text-xs">
+                    <span class="rounded-full border border-orange-500/30 bg-orange-500/10 px-3 py-1 text-orange-300"
+                          x-text="sequenceNumber ? `Sequence ${sequenceNumber}` : 'Awaiting Draw'"></span>
+                    <span x-show="itemNumber" x-cloak
+                          class="rounded-full border border-slate-600 bg-slate-800 px-3 py-1 text-slate-300"
+                          x-text="`Prize Item ${itemNumber}`"></span>
                 </div>
 
-                <div
-                    x-ref="spinner"
-                    x-text="spinningNumber"
-                    :class="animating && !falling ? 'raffle-number-spinning' : ''"
-                    class="text-5xl font-black tracking-wider text-orange-400 sm:text-7xl lg:text-8xl"
-                ></div>
-            </div>
-        </div>
+                <h2 class="raffle-prize-name max-w-full font-black leading-tight text-white" x-text="prizeName"></h2>
 
-        {{-- Floating Winning Number --}}
+                <div class="raffle-number-panel flex w-full max-w-4xl min-h-0 flex-col items-center justify-center rounded-xl border border-orange-500/30 bg-slate-950/90 px-3 py-2">
+                    <p class="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 sm:text-xs">Winning Raffle Number</p>
+                    <div x-ref="spinner" x-text="spinningNumber"
+                         :class="animating && !falling ? 'raffle-number-spinning' : ''"
+                         class="raffle-main-number max-w-full font-black leading-none tracking-wider text-orange-400"></div>
+                    <p class="mt-1 text-[10px] font-semibold uppercase tracking-widest text-slate-400 sm:text-xs"
+                       x-text="animating ? 'Drawing Winners...' : 'Ready for Next Draw'"></p>
+                </div>
+            </div>
+        </section>
+
+        {{-- Floating winning number: stays outside clipping containers --}}
         <template x-teleport="body">
-            <div
-                x-show="falling"
-                x-cloak
-                :style="fallingStyle"
-                x-text="fallingNumber"
-                class="raffle-floating-winner rounded-xl border border-green-400 bg-green-100 px-5 py-4 text-center text-3xl font-black text-green-800 shadow-2xl"
-            ></div>
+            <div x-show="falling" x-cloak :style="fallingStyle" x-text="fallingNumber"
+                 class="raffle-floating-winner rounded-xl border border-orange-400 bg-orange-100 px-4 py-3 text-center text-2xl font-black text-orange-900 shadow-2xl"></div>
         </template>
 
-        {{-- Winners Area --}}
-        <div class="mt-8 rounded-3xl border border-slate-700 bg-slate-900 p-6 sm:p-8">
-
-            <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
-                <h3 class="text-xl font-bold sm:text-2xl">
-                    Winning Raffle Numbers
-                </h3>
-
-                <span class="rounded-full bg-orange-500/10 px-4 py-2 text-sm font-semibold text-orange-400">
-                    <span x-text="displayedWinners.length"></span>
-                    Winners
-                </span>
+        {{-- Winner board: takes remaining screen height --}}
+        <section class="raffle-results flex min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-700/70 bg-slate-900/95">
+            <div class="flex shrink-0 items-center justify-between gap-3 border-b border-slate-700/60 px-3 py-2 sm:px-5">
+                <div class="min-w-0">
+                    <p class="text-[9px] font-bold uppercase tracking-[0.18em] text-orange-400 sm:text-[10px]">Official Raffle Results</p>
+                    <h3 class="truncate text-base font-black sm:text-xl">Winning Numbers</h3>
+                </div>
+                <div class="shrink-0 rounded-xl border border-orange-500/20 bg-orange-500/10 px-3 py-1.5 text-center">
+                    <p class="text-[9px] uppercase tracking-wider text-slate-400">Winners</p>
+                    <p class="text-lg font-black leading-none text-orange-400 sm:text-xl" x-text="displayedWinners.length"></p>
+                </div>
             </div>
 
-            <div
-                x-ref="winnerGrid"
-                class="grid min-h-40 grid-cols-2 content-start gap-3 sm:grid-cols-4 lg:grid-cols-6"
-            >
-                <template
-                    x-for="(number, index) in displayedWinners"
-                    :key="`${currentPrizeId}-${index}`"
-                >
-                    <div
-                        x-text="number"
-                        class="raffle-winner-land rounded-xl border border-orange-500/30 bg-slate-950 px-3 py-4 text-center text-lg font-bold text-orange-400"
-                    ></div>
-                </template>
+            <div class="relative min-h-0 flex-1 p-2 sm:p-3">
+                <div x-ref="winnerGrid"
+                     :style="`grid-template-columns: repeat(${columns}, minmax(0, 1fr)); grid-template-rows: repeat(${rows}, minmax(0, 1fr));`"
+                     class="raffle-winner-grid grid h-full min-h-0 w-full gap-1.5 sm:gap-2">
+                    <template x-for="(number, index) in displayedWinners" :key="`${currentPrizeId}-${index}`">
+                        <div class="raffle-winner-land flex min-h-0 min-w-0 items-center justify-center overflow-hidden rounded-lg border border-orange-500/25 bg-slate-950 px-1 text-center shadow-md">
+                            <span x-text="number" class="raffle-grid-number block max-w-full truncate font-black leading-none tracking-wide text-orange-300"></span>
+                        </div>
+                    </template>
+                </div>
+
+                <div x-show="displayedWinners.length === 0 && !animating" x-cloak
+                     class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-center">
+                    <p class="text-lg font-bold text-slate-300">Waiting for Winning Numbers</p>
+                    <p class="text-xs text-slate-500">Winners will appear automatically</p>
+                </div>
             </div>
+        </section>
 
-            <p
-                x-show="displayedWinners.length === 0 && !animating"
-                x-cloak
-                class="mt-4 text-center text-lg text-slate-500"
-            >
-                Winners will appear here automatically
-            </p>
-        </div>
-
-        {{-- Footer --}}
-        <div class="mt-8 text-center text-sm text-slate-500">
+        <footer class="raffle-footer flex items-center justify-center text-[10px] text-slate-500 sm:text-xs">
             MAMSAR Raffle Management System
-        </div>
+        </footer>
     </div>
 </div>
 
 <style>
+    [x-cloak] { display: none !important; }
+
+    /* The stage fits the browser viewport, not a presumed LED pixel resolution. */
+    .raffle-audience {
+        height: 100vh;
+        height: 100dvh;
+        overflow: hidden;
+        padding: clamp(6px, 1.1vh, 14px) clamp(8px, 1.3vw, 24px);
+    }
+    .raffle-stage {
+        display: grid;
+        grid-template-rows: auto minmax(0, 32fr) minmax(0, 68fr) auto;
+        gap: clamp(5px, 0.9vh, 12px);
+        height: 100%;
+        min-height: 0;
+    }
+    .raffle-header { padding: 0 2px clamp(5px, 0.7vh, 10px); }
+    .raffle-footer { min-height: 12px; }
+    .raffle-prize-name { font-size: clamp(17px, min(2.8vw, 3.7vh), 42px); }
+    .raffle-number-panel { flex: 1; max-height: 65%; }
+    .raffle-main-number { font-size: clamp(28px, min(5.5vw, 8vh), 90px); }
+    .raffle-grid-number { font-size: clamp(10px, min(1.65vw, 2.7vh), 27px); }
+
     .raffle-floating-winner {
-        transition:
-            left 300ms cubic-bezier(0.35, 0, 0.75, 0.75),
-            top 300ms cubic-bezier(0.35, 0, 0.75, 0.75),
-            transform 300ms ease-in,
-            opacity 300ms ease-in;
+        transition: left 300ms cubic-bezier(0.35, 0, 0.75, 0.75),
+                    top 300ms cubic-bezier(0.35, 0, 0.75, 0.75),
+                    transform 300ms ease-in, opacity 300ms ease-in;
     }
-
     @keyframes raffleWinnerLand {
-        0% {
-            opacity: 0;
-            transform: translateY(-35px) scale(1.2);
-        }
-
-        55% {
-            opacity: 1;
-            transform: translateY(8px) scale(0.92);
-        }
-
-        75% {
-            transform: translateY(-10px) scale(1.06);
-        }
-
-        90% {
-            transform: translateY(3px) scale(0.98);
-        }
-
-        100% {
-            opacity: 1;
-            transform: translateY(0) scale(1);
-        }
+        0% { opacity: 0; transform: translateY(-18px) scale(1.1); }
+        60% { opacity: 1; transform: translateY(3px) scale(0.96); }
+        100% { opacity: 1; transform: translateY(0) scale(1); }
     }
-
-    .raffle-winner-land {
-        animation: raffleWinnerLand 250ms ease-out both;
-    }
-
+    .raffle-winner-land { animation: raffleWinnerLand 250ms ease-out both; }
     @keyframes raffleNumberSpin {
-        0% {
-            transform: translateY(-8px) scale(0.96);
-            opacity: 0.5;
-            filter: blur(2px);
-        }
-
-        50% {
-            transform: translateY(8px) scale(1.05);
-            opacity: 1;
-            filter: blur(0);
-        }
-
-        100% {
-            transform: translateY(-8px) scale(0.96);
-            opacity: 0.5;
-            filter: blur(2px);
-        }
+        0%, 100% { transform: translateY(-3px) scale(0.98); opacity: 0.7; }
+        50% { transform: translateY(3px) scale(1.03); opacity: 1; }
     }
+    .raffle-number-spinning { animation: raffleNumberSpin 150ms ease-in-out infinite; }
 
-    .raffle-number-spinning {
-        animation: raffleNumberSpin 150ms ease-in-out infinite;
+    /* Very short browser windows: give the grid even more space. */
+    @media (max-height: 650px) {
+        .raffle-stage { grid-template-rows: auto minmax(0, 27fr) minmax(0, 73fr) auto; }
+        .raffle-prize-name { font-size: clamp(14px, 3vh, 26px); }
+        .raffle-main-number { font-size: clamp(24px, 6vh, 55px); }
     }
-
-    [x-cloak] {
-        display: none !important;
-    }
-
     @media (prefers-reduced-motion: reduce) {
-        .raffle-floating-winner {
-            transition: none;
-        }
-
-        .raffle-winner-land,
-        .raffle-number-spinning {
-            animation: none;
-        }
+        .raffle-floating-winner { transition: none; }
+        .raffle-winner-land, .raffle-number-spinning { animation: none; }
     }
 </style>
